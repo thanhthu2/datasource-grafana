@@ -8,8 +8,9 @@ import (
 )
 
 type PluginSettings struct {
-	Path    string                `json:"path"`
-	Secrets *SecretPluginSettings `json:"-"`
+	Path             string                `json:"path"`
+	DefaultTimeField string                `json:"defaultTimeField"`
+	Secrets          *SecretPluginSettings `json:"-"`
 }
 
 type SecretPluginSettings struct {
