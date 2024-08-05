@@ -4,94 +4,168 @@ import {
   DataSourceApi,
   DataSourceInstanceSettings,
   MetricFindValue,
-  ScopedVars,
 } from '@grafana/data';
-import { getBackendSrv, getTemplateSrv, isFetchError } from '@grafana/runtime';
-import { lastValueFrom } from 'rxjs';
-import { DataSourceResponse, MyDataSourceOptions, MyQuery, MyVariableQuery } from './types';
+import { getBackendSrv, getTemplateSrv } from '@grafana/runtime';
+import { isEmpty } from 'lodash';
+import { ComponentModel } from 'types/component.types';
+import { TagModel } from 'types/tag.types';
+import { transformRequest } from 'utils/helpers';
+import { ChaosMeshVariableQuery, MyDataSourceOptions, MyQuery, QUERY_TYPE_ENUMS } from './types';
 
 export class DataSource extends DataSourceApi<MyQuery, MyDataSourceOptions> {
   baseUrl: string;
+  tagCache: TagModel[] | [] = [];
+  listComponentCache: ComponentModel[] | [] = [];
+  listNodeByTag: any | [] = [];
+  datasourceUID: string;
 
   constructor(instanceSettings: DataSourceInstanceSettings<MyDataSourceOptions>) {
     super(instanceSettings);
     this.baseUrl = instanceSettings.url!;
+    this.datasourceUID = instanceSettings.uid;
   }
 
   async query(options: DataQueryRequest<MyQuery>): Promise<DataQueryResponse> {
-    // const query = getTemplateSrv().replace('SELECT * FROM services WHERE id = "$service"', options.scopedVars);
-    console.log('onchange', options);
-    const rawQuery = '$user';
-
-    // Sử dụng interpolateVariablesInQueries để thay thế biến
-    const query1 = getTemplateSrv().replace(rawQuery, options.scopedVars);
-    const promises = options.targets.map((target) => {
-      // const query = getTemplateSrv().replace(target.queryText, options.scopedVars);
-      return this.fetchPosts(query1);
-    });
-
-    const data = await Promise.all(promises);
-    return { data: data.flat() };
+    return [];
   }
 
-  async fetchPosts(userId: string): Promise<any> {
-    const response = await fetch(`https://jsonplaceholder.typicode.com/posts?userId=${userId}`);
-    const posts = await response.json();
-    return posts.map((post: any) => ({
-      target: `userId ${userId}`,
-      datapoints: [[post.id, post.userId]],
-    }));
+  async handleGetTags() {
+    const [err, res] = await transformRequest(
+      getBackendSrv().get(`api/datasources/uid/${this.datasourceUID}/resources/tags`)
+    );
+    if (err) {
+      return;
+    }
+    this.tagCache = res.data || [];
+    return (res.data || []).map((tag: any) => ({ text: tag?.name }));
   }
 
-  async request(url: string, params?: string) {
-    const response = getBackendSrv().fetch<DataSourceResponse>({
-      url: `${this.baseUrl}${url}${params?.length ? `?${params}` : ''}`,
-    });
-
-    return lastValueFrom(response);
+  async handleGetComponents() {
+    const [err, res] = await transformRequest(
+      getBackendSrv().get(`api/datasources/uid/${this.datasourceUID}/resources/components`)
+    );
+    if (err) {
+      return;
+    }
+    this.listComponentCache = res.data || [];
+    return (res.data || []).map((component: any) => ({ text: component?.name }));
   }
 
-  async metricFindQuery(query: MyVariableQuery, options: any): Promise<MetricFindValue[]> {
-    console.log({ options });
-    if (query.queryType === 'user') {
-      const data = await fetch(`https://jsonplaceholder.typicode.com/users`).then((res) => res.json());
-      return data.map((user: any) => ({ text: user.name, value: user.id }));
+  getCurrentTagUID(variable: string) {
+    const tagName = getTemplateSrv().replace(variable, {}, 'text');
+    return this.tagCache.find((tag) => tag.name === tagName)?.uid;
+  }
+
+  getCurrentNodeUID(variable: string) {
+    const nodeName = getTemplateSrv().replace(variable, {}, 'text');
+    const transformNodes = this.listNodeByTag.map((node: any) => ({ ...node, meta_data: JSON.parse(node.meta_data) }));
+    return transformNodes.find((node: any) => node?.meta_data?.selected === nodeName).uid;
+  }
+
+  getCurrentComponentUID(variable: string) {
+    const componentName = getTemplateSrv().replace(variable, {}, 'text');
+    return this.listComponentCache.find((component) => component.name === componentName)?.uid;
+  }
+
+  async handleGetNodesByTagID(variable: string) {
+    const [err, res] = await transformRequest(
+      getBackendSrv().get(`api/datasources/uid/${this.datasourceUID}/resources/nodes`, {
+        tagID: this.getCurrentTagUID(variable),
+      })
+    );
+    if (err) {
+      return;
+    }
+
+    const transformData = res.data.reduce((acc: any[], node: any) => {
+      const parseMetaData = JSON.parse(node.meta_data);
+      const text = isEmpty(parseMetaData) ? null : parseMetaData?.selected;
+
+      if (text) {
+        acc.push({ text });
+      }
+
+      return acc;
+    }, []);
+    this.listNodeByTag = res.data;
+    return transformData;
+  }
+
+  async handleGetNodeByComponent(options: any) {
+    const variableComponent = options?.variable?.query?.variableComponent;
+    const variableTag = options?.variable?.query?.variableTag;
+    if (!variableComponent || !variableTag) return [];
+
+    const [err, res] = await transformRequest(
+      getBackendSrv().get(`api/datasources/uid/${this.datasourceUID}/resources/nodes-by-component`, {
+        tagID: this.getCurrentTagUID(variableTag),
+        componentUID: this.getCurrentComponentUID(variableComponent),
+      })
+    );
+    if (err) {
+      return;
+    }
+    const transformData = res.data.reduce((acc: any[], node: any) => {
+      const parseMetaData = JSON.parse(node.meta_data);
+      const text = isEmpty(parseMetaData) ? null : parseMetaData?.selected;
+
+      if (text) {
+        acc.push({ text });
+      }
+
+      return acc;
+    }, []);
+
+    return transformData;
+  }
+
+  async handleGetNodesByNode(options: any) {
+    const variableNode = options?.variable?.query?.variableNode;
+    const kind = options?.variable?.query?.kind;
+
+    if (!variableNode || !kind) return [];
+    const [err, res] = await transformRequest(
+      getBackendSrv().get(`api/datasources/uid/${this.datasourceUID}/resources/nodes-by-node`, {
+        nodeID: this.getCurrentNodeUID(variableNode),
+        kind: kind,
+      })
+    );
+    if (err) {
+      return;
+    }
+    const transformData = res.data.reduce((acc: any[], node: any) => {
+      const parseMetaData = JSON.parse(node.meta_data);
+      const text = isEmpty(parseMetaData) ? null : parseMetaData?.selected;
+
+      if (text) {
+        acc.push({ text });
+      }
+
+      return acc;
+    }, []);
+
+    return transformData;
+  }
+
+  async metricFindQuery(query: ChaosMeshVariableQuery, options: any): Promise<MetricFindValue[]> {
+    if (query.queryType === QUERY_TYPE_ENUMS.TAG) {
+      return await this.handleGetTags();
+    } else if (query.queryType === QUERY_TYPE_ENUMS.COMPONENT) {
+      return await this.handleGetComponents();
+    } else if (query.queryType === QUERY_TYPE_ENUMS.NODE_BY_TAG) {
+      const { variableTag } = options.variable.query;
+      return await this.handleGetNodesByTagID(variableTag);
+    } else if (query.queryType === QUERY_TYPE_ENUMS.NODE_BY_COMPONENT) {
+      return await this.handleGetNodeByComponent(options);
     } else {
-      const userId = options.variable.query.user;
-      const data = await fetch(`https://jsonplaceholder.typicode.com/posts?userId=${userId}`).then((res) =>
-        res.json()
-      );
-      return data.map((post: any) => ({ text: post.title, value: post.id }));
+      return await this.handleGetNodesByNode(options);
     }
   }
 
   async testDatasource() {
-    const defaultErrorMessage = 'Cannot connect to API';
-
-    try {
-      const response = await this.request('/health');
-      if (response.status === 200) {
-        return {
-          status: 'success',
-          message: 'Success',
-        };
-      } else {
-        return {
-          status: 'error',
-          message: response.statusText ? response.statusText : defaultErrorMessage,
-        };
-      }
-    } catch (err) {
-      let message = defaultErrorMessage;
-      if (typeof err === 'string') {
-        message = err;
-      } else if (isFetchError(err)) {
-        message = `Fetch error: ${err.data.error?.message ?? err.statusText}`;
-      }
-      return {
-        status: 'error',
-        message,
-      };
-    }
+    return {
+      status: 'success',
+      message: 'Success',
+    };
   }
 }

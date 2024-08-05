@@ -19,7 +19,7 @@ import { getTemplateSrv } from '@grafana/runtime';
 import { InlineField, Select } from '@grafana/ui';
 import _ from 'lodash';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChaosMeshVariableQuery } from 'types';
+import { ChaosMeshVariableQuery, NODE_KIND, QUERY_TYPE_ENUMS } from 'types';
 
 interface VariableQueryProps {
   query: ChaosMeshVariableQuery;
@@ -28,84 +28,88 @@ interface VariableQueryProps {
 
 const QUERY_TYPE = [
   {
-    value: 'post',
-    label: 'post',
+    value: QUERY_TYPE_ENUMS.TAG,
+    label: 'Query Tag',
   },
   {
-    value: 'user',
-    label: 'user',
+    value: QUERY_TYPE_ENUMS.COMPONENT,
+    label: 'Query component',
+  },
+  {
+    value: QUERY_TYPE_ENUMS.NODE_BY_TAG,
+    label: 'Query nodes by tag',
+  },
+  {
+    value: QUERY_TYPE_ENUMS.NODE_BY_COMPONENT,
+    label: 'Query nodes by component',
+  },
+  {
+    value: QUERY_TYPE_ENUMS.NODE_BY_NODE,
+    label: 'Query nodes by node',
+  },
+];
+
+const KIND_NODE = [
+  {
+    value: NODE_KIND.TARGET,
+    label: 'From',
+  },
+  {
+    value: NODE_KIND.SOURCE,
+    label: 'To',
   },
 ];
 
 export const VariableQueryEditor = ({ onChange, query }: VariableQueryProps) => {
   const debouncedOnChange = useMemo(() => _.debounce(onChange, 300), [onChange]);
   const [state, setState] = useState(query);
-  const [posts, setPosts] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [variables, setVariables] = useState<any[]>([]);
+  const [variableOptions, setVariableOptions] = useState<SelectableValue<string>[]>();
+
+  const getVariables = () => {
+    const variables = getTemplateSrv().getVariables();
+    const filterVariablesStateEqualDone = variables.filter((variable) => variable.state === 'Done');
+    const newVariableOptions = filterVariablesStateEqualDone.map((variable) => ({
+      value: `$${variable.id}`,
+      label: `$${variable.name}`,
+    }));
+    setVariableOptions(newVariableOptions);
+  };
 
   useEffect(() => {
-    const templateSrv = getTemplateSrv();
-    const variables = templateSrv.getVariables();
-    setVariables(variables);
-  }, []);
-
-  useEffect(() => {
-    debouncedOnChange(state, `user: ${state.user}`);
+    debouncedOnChange(state, `user: ${state.queryType}`);
+    debouncedOnChange(state, `tag: ${state.tag}`);
+    debouncedOnChange(state, `variableTag: ${state.variableTag}`);
+    debouncedOnChange(state, `variableComponent: ${state.variableComponent}`);
+    debouncedOnChange(state, `kind: ${state.kind}`);
+    debouncedOnChange(state, `variableNode: ${state.variableNode}`);
   }, [debouncedOnChange, state]);
 
   const onQueryTypeChange = (option: SelectableValue<ChaosMeshVariableQuery['queryType']>) => {
     setState({ ...state, queryType: option.value! });
   };
 
-  const onUserChange = (option: SelectableValue<ChaosMeshVariableQuery['user']>) => {
-    setState({ ...state, user: option.value! });
+  const onVariableTagChange = (option: SelectableValue<ChaosMeshVariableQuery['variableTag']>) => {
+    setState({ ...state, variableTag: option.value! });
   };
 
-  const onPostChange = (option: SelectableValue<ChaosMeshVariableQuery['post']>) => {
-    setState({ ...state, post: option.value! });
+  const onVariableNodeChange = (option: SelectableValue<ChaosMeshVariableQuery['variableNode']>) => {
+    setState({ ...state, variableNode: option.value! });
   };
 
-  const onVariableChange = (option: SelectableValue<ChaosMeshVariableQuery['variable']>) => {
-    setState({ ...state, variable: option.value! });
+  const onVariableComponentChange = (option: SelectableValue<ChaosMeshVariableQuery['variableComponent']>) => {
+    setState({ ...state, variableComponent: option.value! });
   };
 
-  const fetchPosts = async () => {
-    const response = await fetch(`https://jsonplaceholder.typicode.com/posts`);
-    const posts = await response.json();
-    setPosts(posts);
+  const onVariableKindChange = (option: SelectableValue<ChaosMeshVariableQuery['kind']>) => {
+    setState({ ...state, kind: option.value! });
   };
 
-  const fetchUsers = async () => {
-    const response = await fetch(`https://jsonplaceholder.typicode.com/users`);
-    const users = await response.json();
-    setUsers(users);
-  };
-
-  const postOptions = posts.map((post: any) => {
-    return {
-      value: post.id,
-      label: post.title,
-    };
-  });
-
-  const userOptions = users.map((user: any) => {
-    return {
-      value: user.id,
-      label: user.name,
-    };
-  });
-
-  const varOptions = variables.map((variable: any) => {
-    return {
-      value: `$${variable.id}`,
-      label: `$${variable.name}`,
-    };
-  });
+  const isQueryTypeEqualNodeByTag = state.queryType === QUERY_TYPE_ENUMS.NODE_BY_TAG;
+  const isQueryTypeEqualNodeByComponent = state.queryType === QUERY_TYPE_ENUMS.NODE_BY_COMPONENT;
+  const isQueryTypeEqualNodeByNode = state.queryType === QUERY_TYPE_ENUMS.NODE_BY_NODE;
 
   useEffect(() => {
-    fetchPosts();
-    fetchUsers();
+    getVariables();
   }, []);
 
   return (
@@ -114,29 +118,40 @@ export const VariableQueryEditor = ({ onChange, query }: VariableQueryProps) => 
         <Select width={30} options={QUERY_TYPE} value={state.queryType} onChange={onQueryTypeChange} />
       </InlineField>
 
-      {state.queryType === 'user' && (
+      {isQueryTypeEqualNodeByTag && (
         <>
-          <InlineField label="User">
-            <Select width={30} options={userOptions} value={state.user} onChange={onUserChange} />
+          <InlineField label="Tag" labelWidth={14} interactive>
+            <Select width={30} options={variableOptions} value={state.variable} onChange={onVariableTagChange} />
           </InlineField>
         </>
       )}
 
-      {state.queryType === 'post' && (
+      {isQueryTypeEqualNodeByComponent && (
         <>
-          {/* <InlineField label="Post">
-            <Select width={30} options={postOptions} value={state.post} onChange={onPostChange} />
-          </InlineField> */}
-
-          <InlineField label="User">
-            <Select width={30} options={userOptions} value={state.user} onChange={onUserChange} />
+          <InlineField label="Tag" labelWidth={14} interactive>
+            <Select width={30} options={variableOptions} value={state.variableTag} onChange={onVariableTagChange} />
+          </InlineField>
+          <InlineField label="Component" labelWidth={14} interactive>
+            <Select
+              width={30}
+              options={variableOptions}
+              value={state.variableComponent}
+              onChange={onVariableComponentChange}
+            />
           </InlineField>
         </>
       )}
 
-      {/* <InlineField label="Metric" tooltip="Select a metric to generate different sets of variable">
-        <Select width={30} options={metricOptions} value={state.metric} onChange={onMetricChange} />
-      </InlineField> */}
+      {isQueryTypeEqualNodeByNode && (
+        <>
+          <InlineField label="Node" labelWidth={14} interactive>
+            <Select width={30} options={variableOptions} value={state.variableNode} onChange={onVariableNodeChange} />
+          </InlineField>
+          <InlineField label="Kind" labelWidth={14} interactive>
+            <Select width={30} options={KIND_NODE} value={state.kind} onChange={onVariableKindChange} />
+          </InlineField>
+        </>
+      )}
     </div>
   );
 };

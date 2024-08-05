@@ -24,17 +24,28 @@ export interface MySecureJsonData {
   apiKey?: string;
 }
 
-export interface MyVariableQuery extends ChaosMeshVariableQuery {
-  namespace: string;
-  rawQuery: string;
+export enum NODE_KIND {
+  SOURCE = 'source',
+  TARGET = 'target',
+}
+
+export enum QUERY_TYPE_ENUMS {
+  COMPONENT = 'component',
+  TAG = 'tag',
+  NODE_BY_TAG = 'node-by-tag',
+  NODE_BY_COMPONENT = 'node-by-component',
+  NODE_BY_NODE = 'node-by-node',
 }
 
 export interface ChaosMeshVariableQuery {
-  user: string;
-  post: string;
-  queryType: string;
-  variable:string
-  queryString?: string;
+  queryType: QUERY_TYPE_ENUMS;
+  tag: string;
+  component: string;
+  variable: string;
+  variableTag: string;
+  variableComponent: string;
+  variableNode: string;
+  kind: NODE_KIND;
 }
 
 export interface MyQuery extends DataQuery {
